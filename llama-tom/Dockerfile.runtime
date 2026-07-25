@@ -1,0 +1,28 @@
+# llama-tom runtime image from a PREBUILT llama-server binary.
+#
+# Why: the from-source Dockerfile builds llama-server from TheTom/llama-cpp-turboquant,
+# but that build currently breaks on the embedded Web UI step (it downloads UI assets
+# from HuggingFace at build time and the 'latest' tarball is incomplete — missing
+# loading.html; -DLLAMA_BUILD_UI=OFF is ignored by the fork). It also must be built
+# with -DGGML_NATIVE=OFF (CI runners have AVX512, the NUC i3-8109U does not -> SIGILL).
+#
+# This image takes the pragmatic, deterministic path: use a llama-server binary built
+# LOCALLY on the NUC (in ~/developments/llama-cuda, container cuda-builder2), which is
+# CPU-flag compatible by construction and already proven on the RTX 3060.
+#
+# Build (from a dir containing the built artifacts: llama-server + lib*.so from
+# /build/bin of the builder container):
+#   podman cp cuda-builder2:/build/bin/. ./bin/
+#   podman build -t ghcr.io/${GH_USER}/llama-tom:latest -f Dockerfile.runtime ./bin/
+FROM docker.io/nvidia/cuda:12.6.2-runtime-ubuntu22.04
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libcurl4 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY . /app/
+RUN chmod +x /app/llama-server \
+    && ln -sf /app/llama-server /usr/local/bin/llama-server
+ENV LD_LIBRARY_PATH=/app
+EXPOSE 8080
+ENTRYPOINT []
+CMD ["llama-server", "--host", "0.0.0.0", "--port", "8080"]
