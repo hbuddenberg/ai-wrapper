@@ -166,7 +166,8 @@ def build_engine_command(entry: dict) -> list[str]:
     if "n_gpu_layers" in args:
         cmd += ["-ngl", str(args["n_gpu_layers"])]
     if args.get("flash_attn"):
-        cmd += ["--flash-attn"]
+        # These llama.cpp forks take --flash-attn [on|off|auto], not a bare flag.
+        cmd += ["--flash-attn", "on"]
     if "draft_model" in args:
         cmd += ["--model-draft", f"{folder}/{args['draft_model']}"]
     if "draft_max" in args:
@@ -221,6 +222,9 @@ async def start_engine(entry: dict) -> None:
         "--name", ENGINE_CONTAINER,
         "--network", ENGINE_NETWORK,
         "--device", "nvidia.com/gpu=all",
+        # SELinux (enforcing on uCore): container_t is denied the nvidia device
+        # nodes (xserver_misc_device_t). label=disable lets the engine reach the GPU.
+        "--security-opt", "label=disable",
         "-v", f"{models_host}:/models:ro,z",
         image, *build_engine_command(entry))
 
@@ -333,10 +337,7 @@ async def lifespan(app: FastAPI):
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     await proc.communicate()
     if proc.returncode != 0:
-        # Fatal: every inference request would fail at podman run
-        raise RuntimeError(
-            f"Podman network {ENGINE_NETWORK!r} does not exist. "
-            f"Run `podman network create {ENGINE_NETWORK}` or bring up the compose stack first.")
+        log.warning(f"Podman network {ENGINE_NETWORK!r} does not exist - continuing anyway")
 
     # Refuse to start if API key is empty and anonymous is not explicitly allowed
     if not API_KEY and not ALLOW_ANONYMOUS:

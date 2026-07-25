@@ -76,6 +76,10 @@ services:
     image: ghcr.io/${GH_USER}/ai-wrapper:latest
     container_name: ai-wrapper
     restart: unless-stopped
+    # SELinux (enforcing on uCore): ai-wrapper must write the rootless podman
+    # socket (user_tmp_t), which container_t is denied. Trusted control plane.
+    security_opt:
+      - label=disable
     # Single OpenAI-compatible endpoint for the whole appliance
     ports:
       - "5120:8000"
