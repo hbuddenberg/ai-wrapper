@@ -30,7 +30,7 @@ GH_USER="hbuddenberg"
 REGISTRY="ghcr.io"
 
 IMAGES=(
-  "${REGISTRY}/${GH_USER}/ai-wrapper:${IMAGE_TAG}"
+  "${REGISTRY}/${GH_USER}/llama-cpp/ai-wrapper:${IMAGE_TAG}"
   "${REGISTRY}/${GH_USER}/llama-cuda:${IMAGE_TAG}"
   "${REGISTRY}/${GH_USER}/llama-atomic:${IMAGE_TAG}"
   "${REGISTRY}/${GH_USER}/llama-tom:${IMAGE_TAG}"
@@ -240,7 +240,7 @@ generate_quadlet() {
 # Generated: $(date -Iseconds)
 
 [Container]
-Image=${REGISTRY}/${GH_USER}/ai-wrapper:${IMAGE_TAG}
+Image=${REGISTRY}/${GH_USER}/llama-cpp/ai-wrapper:${IMAGE_TAG}
 ContainerName=ai-wrapper
 PublishPort=5128:8000
 SecurityLabelDisable=true
