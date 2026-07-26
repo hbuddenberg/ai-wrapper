@@ -28,7 +28,7 @@ jobs:
           tags: ghcr.io/${{ github.repository_owner }}/llama-tom:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Set the ENGINE_SOURCE_REF repository variable to a commit SHA
-          # for reproducible builds; falls back to the main branch tip.
-          build-args: |
-            SOURCE_REF=${{ vars.ENGINE_SOURCE_REF || 'main' }}
+          # Deterministic build: SOURCE_REF is the commit SHA pinned as the ARG
+          # default in the Dockerfile. Do NOT override with 'main' — the upstream
+          # fork has no 'main' branch. To bump the engine, edit the SHA in the
+          # Dockerfile.

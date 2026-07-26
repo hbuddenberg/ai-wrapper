@@ -423,40 +423,57 @@ async def list_models(request: Request):
             "data": [{"id": alias, "object": "model", "owned_by": "nuc"} for alias in registry]}
 
 
-# --- API key management (admin; requires a valid key to mint/revoke) ---
+# --- API key management (admin) ---
+# W1 fix: /admin/keys* require the bootstrap env key (admin), not any valid key.
+# W3 fix: serialize KEYS_FILE read-modify-write with a lock (no TOCTOU race).
+_keys_lock = asyncio.Lock()
+
+
+def require_admin(request: Request) -> None:
+    """Admin actions (mint/list/revoke keys) require the bootstrap env key."""
+    auth = request.headers.get("authorization", "")
+    token = auth[7:] if auth.startswith("Bearer ") else ""
+    if not API_KEY or token != API_KEY:
+        raise HTTPException(403, "Admin privileges required (bootstrap key)")
+
 
 @app.post("/admin/keys")
 async def mint_key(request: Request):
-    """Mint a new sk-llama-<random> API key. Requires an existing valid key."""
-    check_auth(request)
+    """Mint a new sk-llama-<random> API key. Admin-only (bootstrap key)."""
+    require_admin(request)
     new_key = "sk-llama-" + secrets.token_hex(24)
-    try:
-        KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with KEYS_FILE.open("a") as f:
-            f.write(new_key + "\n")
-    except OSError as exc:
-        raise HTTPException(500, f"Could not persist key: {exc}")
+    async with _keys_lock:
+        try:
+            KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with KEYS_FILE.open("a") as f:
+                f.write(new_key + "\n")
+        except OSError as exc:
+            raise HTTPException(500, f"Could not persist key: {exc}")
     log.info("Issued new API key via /admin/keys")
     return {"key": new_key}
 
 
 @app.get("/admin/keys")
 async def list_keys(request: Request):
-    check_auth(request)
+    require_admin(request)
     keys = sorted(_load_keys())
     return {"count": len(keys), "keys": [k[:24] + "…" for k in keys]}
 
 
-@app.delete("/admin/keys/{prefix}")
-async def revoke_key(prefix: str, request: Request):
-    check_auth(request)
-    file_keys = [k for k in _load_keys() if k != API_KEY]
-    remaining = [k for k in file_keys if not k.startswith(prefix)]
-    removed = len(file_keys) - len(remaining)
-    try:
-        KEYS_FILE.write_text("\n".join(remaining) + ("\n" if remaining else ""))
-    except OSError as exc:
-        raise HTTPException(500, f"Could not persist: {exc}")
+@app.delete("/admin/keys/{key}")
+async def revoke_key(key: str, request: Request):
+    # W2 fix: revoke by EXACT key match (no prefix over-revoke / DoS).
+    require_admin(request)
+    if len(key) < 32:
+        raise HTTPException(400, "Provide the full key to revoke (exact match)")
+    async with _keys_lock:
+        file_keys = [k for k in _load_keys() if k != API_KEY]
+        remaining = [k for k in file_keys if k != key]
+        removed = len(file_keys) - len(remaining)
+        try:
+            KEYS_FILE.write_text("\n".join(remaining) + ("\n" if remaining else ""))
+        except OSError as exc:
+            raise HTTPException(500, f"Could not persist: {exc}")
     return {"revoked": removed, "remaining_file_keys": len(remaining)}
 
 
