@@ -31,6 +31,17 @@ API_KEY = os.getenv("WRAPPER_API_KEY", "")
 ALLOW_ANONYMOUS = os.getenv("ALLOW_ANONYMOUS", "").lower() == "true"
 ENGINE_CONTAINER = "llama-engine"
 ENGINE_PORT = 8080
+
+def _parse_engine_ports(env: str) -> dict:
+    # Per-engine published host port. Engines are mutually exclusive on the GPU,
+    # so only the active engine's port is live at a time. Override via ENGINE_PORTS.
+    out = {"llama-cuda": 5121, "llama-atomic": 5122, "llama-tom": 5123}
+    for item in (env or "").split(","):
+        if ":" in item:
+            k, v = item.split(":", 1)
+            out[k.strip()] = int(v.strip())
+    return out
+ENGINE_PORTS = _parse_engine_ports(os.getenv("ENGINE_PORTS", ""))
 VRAM_COOLDOWN_S = 1.5
 DEFAULT_LOAD_TIMEOUT_S = 30
 
@@ -217,7 +228,8 @@ async def start_engine(entry: dict) -> None:
 
     models_host = MODELS_HOST_DIR or "/models"
     image = f"ghcr.io/{GH_USER}/{entry['engine']}:latest"
-    await podman(
+    port = ENGINE_PORTS.get(entry["engine"])
+    run_args = [
         "run", "--rm", "-d",
         "--name", ENGINE_CONTAINER,
         "--network", ENGINE_NETWORK,
@@ -225,8 +237,11 @@ async def start_engine(entry: dict) -> None:
         # SELinux (enforcing on uCore): container_t is denied the nvidia device
         # nodes (xserver_misc_device_t). label=disable lets the engine reach the GPU.
         "--security-opt", "label=disable",
-        "-v", f"{models_host}:/models:ro,z",
-        image, *build_engine_command(entry))
+    ]
+    if port:  # publish the engine on its dedicated host port (5121-5123)
+        run_args += ["-p", f"{port}:{ENGINE_PORT}"]
+    run_args += ["-v", f"{models_host}:/models:ro,z", image, *build_engine_command(entry)]
+    await podman(*run_args)
 
     timeout = float(entry["args"].get("load_timeout", DEFAULT_LOAD_TIMEOUT_S))
     deadline = asyncio.get_running_loop().time() + timeout  # Fix 8: get_running_loop

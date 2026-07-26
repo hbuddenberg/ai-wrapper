@@ -82,7 +82,7 @@ services:
       - label=disable
     # Single OpenAI-compatible endpoint for the whole appliance
     ports:
-      - "5120:8000"
+      - "5128:8000"
     environment:
       - WRAPPER_API_KEY=${WRAPPER_API_KEY}
       # Fix 12: ALLOW_ANONYMOUS passthrough (default unset — wrapper refuses to start open)
