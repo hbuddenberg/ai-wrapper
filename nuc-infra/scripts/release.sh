@@ -21,8 +21,11 @@ set -euo pipefail
 # =====================================================================
 #  RELEASE METADATA — single source of truth.
 #  Bump IMAGE_TAG to cut a new release. That's it.
+#  NOTE: CI currently publishes :latest. To use version tags, update the
+#  workflows to also tag images on git tag pushes. Until then, rollback
+#  is digest-based (state file records digests for byte-identical recall).
 # =====================================================================
-IMAGE_TAG="v1.0.0"
+IMAGE_TAG="latest"
 GH_USER="hbuddenberg"
 REGISTRY="ghcr.io"
 
