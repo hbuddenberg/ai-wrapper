@@ -96,6 +96,7 @@ services:
       # Fix 12: plain mount, no :z — do not SELinux-relabel a socket
       - /run/user/1000/podman/podman.sock:/run/podman/podman.sock
       - ./data/models:/models:ro,z
+      - ./data/api_keys.txt:/app/api_keys.txt:z
     networks:
       - ai-isolated-net
 

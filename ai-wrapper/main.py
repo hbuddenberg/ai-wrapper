@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import sys
 import tomllib
 from contextlib import asynccontextmanager
@@ -29,6 +30,25 @@ ENGINE_NETWORK = os.getenv("ENGINE_NETWORK", "nuc-infra_ai-isolated-net")
 GH_USER = os.getenv("GH_USER", "")
 API_KEY = os.getenv("WRAPPER_API_KEY", "")
 ALLOW_ANONYMOUS = os.getenv("ALLOW_ANONYMOUS", "").lower() == "true"
+# Multi-key store: the env API_KEY (bootstrap, not revocable via API) plus any
+# persisted keys in KEYS_FILE (minted via POST /admin/keys, individually revocable).
+KEYS_FILE = Path(os.getenv("KEYS_FILE", "/app/api_keys.txt"))
+
+
+def _load_keys() -> set:
+    """Valid bearer keys = the env API_KEY + any persisted in KEYS_FILE."""
+    keys = set()
+    if API_KEY:
+        keys.add(API_KEY)
+    try:
+        if KEYS_FILE.exists():
+            for line in KEYS_FILE.read_text().splitlines():
+                k = line.strip()
+                if k and not k.startswith("#"):
+                    keys.add(k)
+    except OSError as exc:
+        log.error("Could not read KEYS_FILE %s: %s", KEYS_FILE, exc)
+    return keys
 ENGINE_CONTAINER = "llama-engine"
 ENGINE_PORT = 8080
 
@@ -330,11 +350,14 @@ async def release_engine() -> None:
 
 
 def check_auth(request: Request) -> None:
-    if not API_KEY:
+    valid = _load_keys()
+    if not valid:  # no keys configured at all → open mode
         return
     auth = request.headers.get("authorization", "")
-    if auth != f"Bearer {API_KEY}":
-        raise HTTPException(401, "Invalid or missing API key")
+    token = auth[7:] if auth.startswith("Bearer ") else ""
+    if token in valid:
+        return
+    raise HTTPException(401, "Invalid or missing API key")
 
 
 # Fix 10: lifespan handler replacing deprecated @app.on_event("startup")
@@ -398,6 +421,43 @@ async def list_models(request: Request):
     registry = scan_registry()
     return {"object": "list",
             "data": [{"id": alias, "object": "model", "owned_by": "nuc"} for alias in registry]}
+
+
+# --- API key management (admin; requires a valid key to mint/revoke) ---
+
+@app.post("/admin/keys")
+async def mint_key(request: Request):
+    """Mint a new sk-llama-<random> API key. Requires an existing valid key."""
+    check_auth(request)
+    new_key = "sk-llama-" + secrets.token_hex(24)
+    try:
+        KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with KEYS_FILE.open("a") as f:
+            f.write(new_key + "\n")
+    except OSError as exc:
+        raise HTTPException(500, f"Could not persist key: {exc}")
+    log.info("Issued new API key via /admin/keys")
+    return {"key": new_key}
+
+
+@app.get("/admin/keys")
+async def list_keys(request: Request):
+    check_auth(request)
+    keys = sorted(_load_keys())
+    return {"count": len(keys), "keys": [k[:24] + "…" for k in keys]}
+
+
+@app.delete("/admin/keys/{prefix}")
+async def revoke_key(prefix: str, request: Request):
+    check_auth(request)
+    file_keys = [k for k in _load_keys() if k != API_KEY]
+    remaining = [k for k in file_keys if not k.startswith(prefix)]
+    removed = len(file_keys) - len(remaining)
+    try:
+        KEYS_FILE.write_text("\n".join(remaining) + ("\n" if remaining else ""))
+    except OSError as exc:
+        raise HTTPException(500, f"Could not persist: {exc}")
+    return {"revoked": removed, "remaining_file_keys": len(remaining)}
 
 
 @app.post("/v1/chat/completions")
