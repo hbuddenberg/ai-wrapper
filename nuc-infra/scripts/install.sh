@@ -3,17 +3,21 @@
 #
 # Usage (from scratch — one-liner):
 #   git clone https://github.com/hbuddenberg/llama-cpp && \
-#     GH_USER=hbuddenberg WRAPPER_API_KEY=<key> bash llama-cpp/nuc-infra/scripts/install.sh
+#     GH_USER=hbuddenberg bash llama-cpp/nuc-infra/scripts/install.sh
 #
 # Or via curl (no prior clone needed):
 #   curl -fsSL https://raw.githubusercontent.com/hbuddenberg/llama-cpp/main/nuc-infra/scripts/install.sh | \
-#     GH_USER=hbuddenberg WRAPPER_API_KEY=<key> bash
+#     GH_USER=hbuddenberg bash
+#
+# If WRAPPER_API_KEY is not set, a key is generated automatically in the format:
+#   sk_llama-cpp_<uuid>
+# The generated key is printed at the end — save it.
 #
 # Required env vars:
 #   GH_USER          — GitHub username that owns the GHCR images
-#   WRAPPER_API_KEY  — Bearer token for ai-wrapper (must not be empty)
 #
 # Optional env vars:
+#   WRAPPER_API_KEY  — Bearer token for ai-wrapper; auto-generated if not set
 #   INSTALL_DIR      — where to clone/find the monorepo (default: $HOME/llama-cpp)
 #   MODELS_HOST_DIR  — absolute path to model storage (default: $INSTALL_DIR/nuc-infra/data/models)
 #   SKIP_MODELS      — set to "1" to skip huggingface model download
@@ -32,10 +36,17 @@ die()   { echo -e "${RED}[error]${NC} $*" >&2; exit 1; }
 
 # ── required env vars ────────────────────────────────────────────────────────
 : "${GH_USER:?GH_USER is required (GitHub username owning the GHCR images)}"
-: "${WRAPPER_API_KEY:?WRAPPER_API_KEY is required (must be a strong non-empty token)}"
 
-[[ "$WRAPPER_API_KEY" == "change-me" ]] && die "WRAPPER_API_KEY must not be the placeholder value"
-[[ "${#WRAPPER_API_KEY}" -lt 16 ]]      && die "WRAPPER_API_KEY is too short (min 16 chars)"
+# Auto-generate WRAPPER_API_KEY if not provided
+_KEY_GENERATED=0
+if [[ -z "${WRAPPER_API_KEY:-}" || "${WRAPPER_API_KEY:-}" == "change-me" ]]; then
+    # Use /proc/sys/kernel/random/uuid when available (Linux); fall back to uuidgen
+    _UUID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || \
+            od -x /dev/urandom | head -1 | awk '{print $2$3"-"$4"-"$5"-"$6"-"$7$8$9}')
+    WRAPPER_API_KEY="sk_llama-cpp_${_UUID}"
+    _KEY_GENERATED=1
+    warn "WRAPPER_API_KEY not set — generated: ${WRAPPER_API_KEY}"
+fi
 
 # ── defaults ─────────────────────────────────────────────────────────────────
 INSTALL_DIR="${INSTALL_DIR:-$HOME/llama-cpp}"
@@ -249,3 +260,14 @@ echo "  To add a model:"
 echo "    mkdir \$MODELS_HOST_DIR/<model-folder>"
 echo "    # add model.gguf + config.toml — ai-wrapper auto-discovers on next request"
 echo ""
+
+if [[ "$_KEY_GENERATED" == "1" ]]; then
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  WRAPPER_API_KEY (auto-generated — save this now):${NC}"
+    echo ""
+    echo "    ${WRAPPER_API_KEY}"
+    echo ""
+    echo -e "${YELLOW}  Use it as:  Authorization: Bearer ${WRAPPER_API_KEY}${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+fi

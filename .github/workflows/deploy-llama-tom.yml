@@ -10,7 +10,7 @@ on:
       source_ref:
         description: "Upstream fork git ref (branch, tag, or SHA)"
         required: false
-        default: "main"
+        default: "feature/turboquant-kv-cache"
 
 jobs:
   build:
@@ -39,6 +39,6 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/llama-tom:latest
           build-args: |
-            SOURCE_REF=${{ inputs.source_ref || vars.ENGINE_SOURCE_REF || 'main' }}
+            SOURCE_REF=${{ inputs.source_ref || vars.ENGINE_SOURCE_REF || 'feature/turboquant-kv-cache' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
