@@ -38,8 +38,8 @@ RUN apt-get update \
 COPY --from=builder /src/build/bin/llama-server /usr/local/bin/llama-server
 COPY --from=builder /src/build/bin/*.so* /usr/local/lib/
 ENV LD_LIBRARY_PATH=/usr/local/lib
-# Fix 16: build-time smoke check — fails the build if the binary or shared libs are broken
-RUN llama-server --version 2>/dev/null || llama-server --help >/dev/null 2>&1
+# No build-time smoke check: llama-server needs libcuda.so.1 (driver), only
+# present at runtime via CDI (--device nvidia.com/gpu=all), not at build time.
 EXPOSE 8080
 ENTRYPOINT []
 CMD ["llama-server", "--host", "0.0.0.0", "--port", "8080"]
