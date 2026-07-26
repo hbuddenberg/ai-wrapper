@@ -6,11 +6,6 @@ on:
     paths:
       - "llama-tom/**"
   workflow_dispatch:
-    inputs:
-      source_ref:
-        description: "Upstream fork git ref (branch, tag, or SHA)"
-        required: false
-        default: "feature/turboquant-kv-cache"
 
 jobs:
   build:
@@ -38,7 +33,7 @@ jobs:
           context: llama-tom
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/llama-tom:latest
-          build-args: |
-            SOURCE_REF=${{ inputs.source_ref || vars.ENGINE_SOURCE_REF || 'feature/turboquant-kv-cache' }}
+          # Deterministic: SOURCE_REF SHA pinned in the Dockerfile ARG default.
+          # Do NOT override — the fork branch moves.
           cache-from: type=gha
           cache-to: type=gha,mode=max

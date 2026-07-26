@@ -1,10 +1,10 @@
-name: Build and push llama-atomic image
+name: Build and push llama-cuda image
 
 on:
   push:
     branches: [main]
     paths:
-      - "llama-atomic/**"
+      - "llama-cuda/**"
   workflow_dispatch:
 
 jobs:
@@ -30,10 +30,11 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          context: llama-atomic
+          context: llama-cuda
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/llama-atomic:latest
-          # Deterministic: SOURCE_REF SHA pinned in the Dockerfile ARG default.
-          # Do NOT override — the fork has no 'main' branch.
+          tags: ghcr.io/${{ github.repository_owner }}/llama-cuda:latest
+          # Deterministic build: SOURCE_REF is the commit SHA pinned as the ARG
+          # default in the Dockerfile. Do NOT override — upstream ggerganov/llama.cpp
+          # pinned for reproducibility. To bump the engine, edit the SHA in the Dockerfile.
           cache-from: type=gha
           cache-to: type=gha,mode=max
