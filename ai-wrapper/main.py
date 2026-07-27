@@ -86,9 +86,10 @@ _swapping: bool = False
 _registry: dict[str, dict] = {}
 # Fix 3: per-file mtime signature instead of directory mtime
 _registry_sig: dict[str, float] = {}
+_schema_cache: dict[str, set[str]] = {}
 
 
-def _validate_args(args: dict, cfg_path: Path) -> bool:
+def _validate_args(args: dict, cfg_path: Path | str, schema_flags: set[str] | None = None) -> bool:
     """Return True if [args] is valid; log and return False otherwise."""
     unknown = set(args) - _ARGS_ALLOWLIST
     if unknown:
@@ -107,12 +108,52 @@ def _validate_args(args: dict, cfg_path: Path) -> bool:
                 log.error("Config %s: [args].extra item %r is not a safe flag/value — excluded",
                           cfg_path, item)
                 return False
+            if schema_flags is not None and item.startswith("-"):
+                flag_name = item.split("=", 1)[0]
+                if flag_name not in schema_flags:
+                    log.error("Config %s: flag %r is not supported by engine schema", cfg_path, flag_name)
+                    return False
     draft = args.get("draft_model")
     if draft is not None and ("/" in draft or ".." in draft):
         log.error("Config %s: [args].draft_model %r must be a filename, not a path — excluded",
                   cfg_path, draft)
         return False
     return True
+
+
+async def get_engine_schema(engine: str) -> set[str] | None:
+    """Lazily load and digest-cache the engine's flags.toml schema using CPU-only podman inspection."""
+    image = f"ghcr.io/{GH_USER}/{engine}:latest"
+    try:
+        inspect_out = await podman("image", "inspect", "--format", "{{.Digest}}", image, check=False)
+        digest = inspect_out.strip()
+        if not digest or "sha256:" not in digest:
+            digest = image
+    except Exception as exc:
+        log.warning("Could not inspect image digest for %s: %s", engine, exc)
+        digest = image
+
+    if digest in _schema_cache:
+        return _schema_cache[digest]
+
+    try:
+        out = await podman(
+            "run", "--rm", "--entrypoint", "/bin/cat", image, "/etc/llama-engine/flags.toml",
+            check=False
+        )
+        if not out.strip() or "flags" not in out:
+            log.warning("No valid flags.toml found for engine %s (digest %s); falling back to legacy allowlist", engine, digest)
+            return None
+        cfg = tomllib.loads(out)
+        flags_list = cfg.get("flags", {}).get("flags", [])
+        if isinstance(flags_list, list):
+            flag_set = set(flags_list)
+            _schema_cache[digest] = flag_set
+            return flag_set
+    except Exception as exc:
+        log.warning("Failed to load schema for engine %s (digest %s): %s; falling back to legacy allowlist", engine, digest, exc)
+
+    return None
 
 
 def scan_registry() -> dict[str, dict]:
@@ -299,6 +340,20 @@ async def acquire_engine(alias: str, entry: dict) -> None:
     requests first, runs with the guard released, and admits no new
     requests until it finishes (single-swapper flag).
     """
+    schema = await get_engine_schema(entry["engine"])
+    if not _validate_args(entry["args"], f"model:{alias}", schema_flags=schema):
+        unsupported = []
+        if schema is not None and "extra" in entry["args"]:
+            for item in entry["args"].get("extra", []):
+                if isinstance(item, str) and item.startswith("-"):
+                    flag_name = item.split("=", 1)[0]
+                    if flag_name not in schema:
+                        unsupported.append(flag_name)
+        err_msg = f"Invalid arguments for engine {entry['engine']!r}"
+        if unsupported:
+            err_msg += f": unsupported flag {unsupported[0]!r}"
+        raise HTTPException(503, err_msg)
+
     global _swapping, _inflight, active_alias
     while True:
         async with _guard:

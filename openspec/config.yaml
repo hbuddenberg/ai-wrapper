@@ -1,0 +1,52 @@
+schema: spec-driven
+
+context: |
+  Multi-component AI appliance workspace (single git repo, NOT a monorepo-of-repos).
+  Python 3.11 single-file FastAPI "VRAM Director" (ai-wrapper/main.py, ~524 LOC)
+  driving 3 CUDA llama.cpp engine images (llama-atomic/cuda/tom) via rootless Podman
+  + CDI GPU passthrough. Orchestration in nuc-infra/ (podman-compose + shell scripts).
+  Stack: FastAPI + httpx + tomllib (Py3.11 stdlib); CUDA 12.4/12.6 builds (CC 8.6);
+  bash scripts (set -euo pipefail). No package manager manifests beyond requirements.txt.
+
+testing:
+  strict_tdd: false
+  # NO test runner exists. No pytest/unittest/tests dirs/conftest/Makefile anywhere.
+  # All CI (root .github/workflows/deploy-*.yml) is build-and-push only.
+  test_runner: none
+  unit: none
+  integration: none
+  e2e: none
+  coverage: none
+  linter: none
+  type_checker: none
+  formatter: none
+  # Only available lightweight check (documented in CLAUDE.md):
+  syntax_check: "python -m py_compile ai-wrapper/main.py"
+
+rules:
+  proposal:
+    - Flag any change spanning >1 subdirectory explicitly; commit boundaries matter.
+    - Note VRAM-isolation hard rule (engines NEVER run concurrently) when relevant.
+  specs:
+    - Use Given/When/Then for scenarios.
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY).
+  design:
+    - Document architecture decisions with rationale; the wrapper is single-file by intent.
+  tasks:
+    - Group by phase, use hierarchical numbering.
+    - Keep tasks completable in one session.
+  apply:
+    guidelines:
+      - Follow existing code patterns (the wrapper is intentionally single-file).
+      - Do not introduce a package manifest (pyproject.toml) without explicit approval.
+    tdd: false  # No test runner exists; RED-GREEN-REFACTOR is unavailable.
+    test_command: ""
+  verify:
+    # CUDA engine builds are heavy (CI runner, not local). Use py_compile for the
+    # Python side; treat Dockerfile changes as build-verified only in CI.
+    test_command: "python -m py_compile ai-wrapper/main.py"
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas.
+    - Confirm whether change touched one subdirectory or several (affects commit/PR plan).
