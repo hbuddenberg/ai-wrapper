@@ -11,7 +11,7 @@ ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs
 # --build-arg SOURCE_REF=<ref> or the ENGINE_SOURCE_REF repo var in CI.
 ARG SOURCE_REF=a6f3d363e4c6a672803d0e6e036f8a75cf43d0ae
 COPY ui.stub.h /tmp/ui.stub.h
-COPY nuc-infra/scripts/extract_flags.py /tmp/extract_flags.py
+COPY extract_flags.py /tmp/extract_flags.py
 WORKDIR /src
 RUN git init -q . \
     && git remote add origin https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant.git \

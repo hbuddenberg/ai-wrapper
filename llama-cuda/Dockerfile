@@ -11,7 +11,7 @@ ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs
 # master). Override via --build-arg SOURCE_REF=<ref> or the ENGINE_SOURCE_REF var.
 ARG SOURCE_REF=da296d6e726654949bce10d7cae9a2195d292bfc
 COPY ui.stub.h /tmp/ui.stub.h
-COPY nuc-infra/scripts/extract_flags.py /tmp/extract_flags.py
+COPY extract_flags.py /tmp/extract_flags.py
 WORKDIR /src
 RUN git init -q . \
     && git remote add origin https://github.com/ggerganov/llama.cpp.git \
