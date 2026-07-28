@@ -4,7 +4,7 @@ engine = "llama-tom"
 file   = "gemma-4-12B-it-heretic-Q4_K_M.gguf"
 
 [args]
-ctx_size     = 131072
+ctx_size     = 65536
 n_gpu_layers = 99
 flash_attn   = true
 load_timeout = 90
