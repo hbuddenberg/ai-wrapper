@@ -71,7 +71,7 @@ DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "")
 
 # Fix 2: allowlist for [args] keys
 _ARGS_ALLOWLIST = {"ctx_size", "n_gpu_layers", "flash_attn", "draft_model",
-                   "draft_max", "draft_min", "load_timeout", "extra"}
+                   "draft_max", "draft_min", "load_timeout", "mmproj", "extra"}
 # Regex for extra items: --flag[=value] or bare value
 _EXTRA_FLAG_RE = re.compile(r'^--[A-Za-z0-9][A-Za-z0-9_.:=-]*$')
 _EXTRA_BARE_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.:=-]*$')
@@ -250,6 +250,10 @@ def build_engine_command(entry: dict) -> list[str]:
         cmd += ["--draft-max", str(args["draft_max"])]
     if "draft_min" in args:
         cmd += ["--draft-min", str(args["draft_min"])]
+    if "mmproj" in args:
+        mm_val = str(args["mmproj"])
+        mm_path = mm_val if mm_val.startswith("/") else f"{folder}/{mm_val}"
+        cmd += ["--mmproj", mm_path]
     cmd += [str(x) for x in args.get("extra", [])]
     return cmd
 
