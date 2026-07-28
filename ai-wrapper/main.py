@@ -226,13 +226,6 @@ def scan_registry() -> dict[str, dict]:
             continue
         registry[alias] = entry
 
-    # Auto-generate -vision alias for models with mmproj so frontends (Chatbox, etc.) enable vision UI
-    for alias, entry in list(registry.items()):
-        if "mmproj" in entry.get("args", {}):
-            v_alias = f"{alias}-vision"
-            if v_alias not in registry:
-                registry[v_alias] = entry
-
     _registry, _registry_sig = registry, sig
     log.info("Model registry: %s", list(registry))
     return registry
@@ -519,15 +512,19 @@ async def status(request: Request):
 async def list_models(request: Request):
     check_auth(request)
     registry = scan_registry()
-    items = [
-        {
+    items = []
+    for alias, entry in registry.items():
+        has_vision = "mmproj" in entry.get("args", {})
+        m_item = {
             "id": alias,
             "name": alias,
             "object": "model",
             "owned_by": entry.get("engine", "nuc"),
+            "supports_vision": has_vision,
+            "capabilities": {"vision": has_vision},
+            "modalities": ["text", "image"] if has_vision else ["text"],
         }
-        for alias, entry in registry.items()
-    ]
+        items.append(m_item)
     return {
         "object": "list",
         "data": items,
