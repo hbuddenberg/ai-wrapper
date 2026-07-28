@@ -226,6 +226,13 @@ def scan_registry() -> dict[str, dict]:
             continue
         registry[alias] = entry
 
+    # Auto-generate -vision alias for models with mmproj so frontends (Chatbox, etc.) enable vision UI
+    for alias, entry in list(registry.items()):
+        if "mmproj" in entry.get("args", {}):
+            v_alias = f"{alias}-vision"
+            if v_alias not in registry:
+                registry[v_alias] = entry
+
     _registry, _registry_sig = registry, sig
     log.info("Model registry: %s", list(registry))
     return registry
