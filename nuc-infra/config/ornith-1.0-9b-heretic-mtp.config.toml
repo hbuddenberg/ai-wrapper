@@ -8,6 +8,7 @@ ctx_size     = 131072
 n_gpu_layers = 99
 flash_attn   = true
 load_timeout = 90
+mmproj       = "mmproj-Ornith-1.0-9B-heretic-MTP-BF16.gguf"
 extra        = [
   "--cache-type-k", "q4_0",
   "--cache-type-v", "q4_0",
