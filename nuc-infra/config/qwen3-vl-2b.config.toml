@@ -10,6 +10,7 @@ flash_attn   = true
 load_timeout = 60
 mmproj       = "mmproj-Qwen3VL-2B-Instruct-F16.gguf"
 extra        = [
+  "--chat-template", "qwen2vl",
   "--image-min-tokens", "1024",
   "--cache-type-k", "q4_0",
   "--cache-type-v", "q4_0",
