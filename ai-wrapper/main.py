@@ -521,7 +521,17 @@ async def list_models(request: Request):
             "object": "model",
             "owned_by": entry.get("engine", "nuc"),
             "supports_vision": has_vision,
-            "capabilities": {"vision": has_vision},
+            "supports_tools": True,
+            "supports_function_calling": True,
+            "supports_reasoning": True,
+            "supports_reasoning_effort": True,
+            "capabilities": {
+                "vision": has_vision,
+                "tools": True,
+                "function_calling": True,
+                "reasoning": True,
+                "reasoning_effort": True,
+            },
             "modalities": ["text", "image"] if has_vision else ["text"],
         }
         items.append(m_item)
