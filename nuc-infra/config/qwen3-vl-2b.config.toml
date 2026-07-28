@@ -14,6 +14,5 @@ extra        = [
   "--cache-type-k", "q4_0",
   "--cache-type-v", "q4_0",
   "--batch-size", "2048",
-  "--ubatch-size", "512",
-  "--jinja"
+  "--ubatch-size", "512"
 ]

@@ -15,6 +15,5 @@ extra        = [
   "--spec-type", "draft-mtp",
   "--spec-draft-n-max", "3",
   "--batch-size", "2048",
-  "--ubatch-size", "512",
-  "--jinja"
+  "--ubatch-size", "512"
 ]
