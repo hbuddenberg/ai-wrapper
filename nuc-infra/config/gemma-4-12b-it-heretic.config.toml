@@ -1,0 +1,17 @@
+[model]
+alias  = "gemma-4-12b-it-heretic"
+engine = "llama-tom"
+file   = "gemma-4-12B-it-heretic-Q4_K_M.gguf"
+
+[args]
+ctx_size     = 131072
+n_gpu_layers = 99
+flash_attn   = true
+load_timeout = 90
+extra        = [
+  "--cache-type-k", "q4_0",
+  "--cache-type-v", "q4_0",
+  "--batch-size", "2048",
+  "--ubatch-size", "512",
+  "--jinja"
+]

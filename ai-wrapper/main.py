@@ -18,6 +18,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -64,6 +65,9 @@ def _parse_engine_ports(env: str) -> dict:
 ENGINE_PORTS = _parse_engine_ports(os.getenv("ENGINE_PORTS", ""))
 VRAM_COOLDOWN_S = 1.5
 DEFAULT_LOAD_TIMEOUT_S = 30
+
+WRAPPER_MODE = os.getenv("WRAPPER_MODE", "dynamic").lower()
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "")
 
 # Fix 2: allowlist for [args] keys
 _ARGS_ALLOWLIST = {"ctx_size", "n_gpu_layers", "flash_attn", "draft_model",
@@ -352,7 +356,12 @@ async def acquire_engine(alias: str, entry: dict) -> None:
         err_msg = f"Invalid arguments for engine {entry['engine']!r}"
         if unsupported:
             err_msg += f": unsupported flag {unsupported[0]!r}"
-        raise HTTPException(503, err_msg)
+    if WRAPPER_MODE == "persistent" and DEFAULT_MODEL and alias != DEFAULT_MODEL:
+        raise HTTPException(
+            400,
+            f"Wrapper running in persistent mode locked to model {DEFAULT_MODEL!r}. "
+            f"Requested model {alias!r} requires setting WRAPPER_MODE=dynamic."
+        )
 
     global _swapping, _inflight, active_alias
     while True:
@@ -445,6 +454,21 @@ async def lifespan(app: FastAPI):
     except RuntimeError as exc:
         log.warning("Startup cleanup: %s", exc)
 
+    if WRAPPER_MODE == "persistent" and DEFAULT_MODEL:
+        registry = scan_registry()
+        if DEFAULT_MODEL in registry:
+            log.info("WRAPPER_MODE='persistent': Pre-loading default model %r...", DEFAULT_MODEL)
+            try:
+                await start_engine(registry[DEFAULT_MODEL])
+                global active_alias
+                async with _guard:
+                    active_alias = DEFAULT_MODEL
+                log.info("WRAPPER_MODE='persistent': Default model %r is ready", DEFAULT_MODEL)
+            except Exception as exc:
+                log.error("Failed to pre-load persistent model %r: %s", DEFAULT_MODEL, exc)
+        else:
+            log.warning("DEFAULT_MODEL %r not in registry: %s", DEFAULT_MODEL, list(registry))
+
     yield
 
     # Deterministic shutdown cleanup, independent of task-cancellation races
@@ -455,6 +479,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ai-wrapper", version="1.0.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # Fix 11: /health does NOT expose active_model (unauthenticated endpoint)
@@ -471,11 +503,49 @@ async def status(request: Request):
 
 
 @app.get("/v1/models")
+@app.get("/models")
+@app.get("/api/models")
 async def list_models(request: Request):
     check_auth(request)
     registry = scan_registry()
-    return {"object": "list",
-            "data": [{"id": alias, "object": "model", "owned_by": "nuc"} for alias in registry]}
+    items = [
+        {
+            "id": alias,
+            "name": alias,
+            "object": "model",
+            "owned_by": entry.get("engine", "nuc"),
+        }
+        for alias, entry in registry.items()
+    ]
+    return {
+        "object": "list",
+        "data": items,
+        "models": items,
+    }
+
+
+@app.get("/api/tags")
+async def ollama_tags(request: Request):
+    check_auth(request)
+    registry = scan_registry()
+    return {
+        "models": [
+            {
+                "name": alias,
+                "model": alias,
+                "modified_at": "2026-07-28T00:00:00Z",
+                "size": 7500000000,
+                "digest": "sha256:0000",
+                "details": {
+                    "format": "gguf",
+                    "family": "llama",
+                    "parameter_size": "12B",
+                    "quantization_level": "Q4_K_M"
+                }
+            }
+            for alias, entry in registry.items()
+        ]
+    }
 
 
 # --- API key management (admin) ---
@@ -533,6 +603,7 @@ async def revoke_key(key: str, request: Request):
 
 
 @app.post("/v1/chat/completions")
+@app.post("/chat/completions")
 async def chat_completions(request: Request):
     check_auth(request)
     body = await request.json()
