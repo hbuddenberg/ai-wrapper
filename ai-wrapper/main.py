@@ -53,6 +53,31 @@ def _load_keys() -> set:
 ENGINE_CONTAINER = "llama-engine"
 ENGINE_PORT = 8080
 
+
+def _parse_podman_timeout(name: str, default: float) -> float:
+    """Parse a positive-float timeout env var; fall back to `default` (with a
+    warning) on missing/invalid/non-positive input. Warn (but still use the
+    value) when it is <=10s, close to `stop -t 10`'s own grace period."""
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        val = float(raw)
+    except ValueError:
+        log.warning("%s=%r is not a valid number; using default %ss", name, raw, default)
+        return default
+    if val <= 0:
+        log.warning("%s=%r must be positive; using default %ss", name, raw, default)
+        return default
+    if val <= 10:
+        log.warning(
+            "%s=%s is very low (<=10s), close to the `stop -t 10` grace period", name, val)
+    return val
+
+
+PODMAN_TIMEOUT_S = _parse_podman_timeout("PODMAN_TIMEOUT_S", 30.0)
+PODMAN_RUN_TIMEOUT_S = _parse_podman_timeout("PODMAN_RUN_TIMEOUT_S", 300.0)
+
 def _parse_engine_ports(env: str) -> dict:
     # Per-engine published host port. Engines are mutually exclusive on the GPU,
     # so only the active engine's port is live at a time. Override via ENGINE_PORTS.
@@ -129,7 +154,8 @@ async def get_engine_schema(engine: str) -> set[str] | None:
     """Lazily load and digest-cache the engine's flags.toml schema using CPU-only podman inspection."""
     image = f"ghcr.io/{GH_USER}/{engine}:latest"
     try:
-        inspect_out = await podman("image", "inspect", "--format", "{{.Digest}}", image, check=False)
+        inspect_out = await podman("image", "inspect", "--format", "{{.Digest}}", image,
+                                    check=False, timeout=PODMAN_TIMEOUT_S)
         digest = inspect_out.strip()
         if not digest or "sha256:" not in digest:
             digest = image
@@ -141,9 +167,13 @@ async def get_engine_schema(engine: str) -> set[str] | None:
         return _schema_cache[digest]
 
     try:
+        # Explicit SHORT bound: this call is "podman run" but a metadata read
+        # (cat a file inside the image), not an image pull — it happens on
+        # EVERY acquire_engine(), so it must not inherit the long
+        # PODMAN_RUN_TIMEOUT_S that _podman_exec auto-selects for "run".
         out = await podman(
             "run", "--rm", "--entrypoint", "/bin/cat", image, "/etc/llama-engine/flags.toml",
-            check=False
+            check=False, timeout=PODMAN_TIMEOUT_S
         )
         if not out.strip() or "flags" not in out:
             log.warning("No valid flags.toml found for engine %s (digest %s); falling back to legacy allowlist", engine, digest)
@@ -258,34 +288,87 @@ def build_engine_command(entry: dict) -> list[str]:
     return cmd
 
 
-async def podman(*args: str, check: bool = True) -> str:
+class PodmanTimeout(RuntimeError):
+    """A podman subprocess exceeded its bound. Always raised, never conflated
+    with a clean non-zero exit (check=False does not suppress this)."""
+
+
+async def _podman_exec(*args: str, timeout: float | None = None) -> tuple[int, str, str]:
+    """Bounded podman subprocess execution. Kills and reaps the child on
+    expiry or cancellation so a stalled podman CLI/socket never leaks an
+    orphaned process nor blocks the caller forever."""
+    if timeout is None:
+        timeout = PODMAN_RUN_TIMEOUT_S if args and args[0] == "run" else PODMAN_TIMEOUT_S
     proc = await asyncio.create_subprocess_exec(
         "podman", "--url", PODMAN_URL, *args,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    out, err = await proc.communicate()
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        await _kill_and_reap(proc)
+        raise PodmanTimeout(
+            f"podman {' '.join(args[:2])} timed out after {timeout}s")
+    except asyncio.CancelledError:
+        await _kill_and_reap(proc)
+        raise
+    return proc.returncode, out.decode(), err.decode()
+
+
+async def _kill_and_reap(proc) -> None:
+    """Kill an orphaned podman child and bound the reap so this never hangs.
+    Best-effort: any failure here is logged, never propagated, so the caller's
+    PodmanTimeout is always raised instead of being replaced by a cleanup error."""
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
+    except Exception as exc:
+        log.warning("Failed to kill orphaned podman child (pid=%s): %s", getattr(proc, "pid", "?"), exc)
+    try:
+        await asyncio.wait_for(proc.wait(), 5)
+    except asyncio.TimeoutError:
+        pass
+    except Exception as exc:
+        log.warning("Failed to reap orphaned podman child (pid=%s): %s", getattr(proc, "pid", "?"), exc)
+
+
+async def podman(*args: str, check: bool = True, timeout: float | None = None) -> str:
+    rc, out, err = await _podman_exec(*args, timeout=timeout)
     # Fix 6: include both stdout and stderr in the error message
-    if check and proc.returncode != 0:
+    if check and rc != 0:
         raise RuntimeError(
             f"podman {' '.join(args[:2])} failed "
-            f"(rc={proc.returncode}): {err.decode().strip()} | stdout: {out.decode().strip()}"
+            f"(rc={rc}): {err.strip()} | stdout: {out.strip()}"
         )
-    return out.decode()
+    return out
+
+
+async def podman_rc(*args: str, timeout: float | None = None) -> int:
+    """Like podman() but returns only the exit code (used for exists checks)."""
+    rc, _out, _err = await _podman_exec(*args, timeout=timeout)
+    return rc
 
 
 async def stop_engine() -> None:
     global active_alias
-    # Fix 5: capture output, verify container is gone, set active_alias only after confirmed
-    await podman("stop", "--ignore", "-t", "10", ENGINE_CONTAINER, check=False)
-    await podman("rm", "--ignore", "-f", ENGINE_CONTAINER, check=False)
-    # Verify the container is actually gone
-    proc = await asyncio.create_subprocess_exec(
-        "podman", "--url", PODMAN_URL, "container", "exists", ENGINE_CONTAINER,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    await proc.communicate()
-    if proc.returncode == 0:
-        # Container still exists
-        raise RuntimeError(f"Container {ENGINE_CONTAINER!r} still exists after stop+rm")
-    active_alias = None
+    try:
+        await podman("stop", "--ignore", "-t", "10", ENGINE_CONTAINER, check=False)
+        await podman("rm", "--ignore", "-f", ENGINE_CONTAINER, check=False)
+        # Verify the container is actually gone
+        rc = await podman_rc("container", "exists", ENGINE_CONTAINER)
+        if rc == 0:
+            raise RuntimeError(f"Container {ENGINE_CONTAINER!r} still exists after stop+rm")
+    finally:
+        # active_alias is cleared on BOTH success and failure (including a
+        # PodmanTimeout propagating from any of the calls above): once we no
+        # longer trust the engine is cleanly stopped, the wrapper must stop
+        # believing the old alias is live so the next request retries the
+        # swap rather than short-circuiting to a dead engine forever.
+        # active_alias reset here is safe: _swapping=True at all call sites
+        # prevents concurrent guard-protected reads. This is the single
+        # source of truth for "no engine is loaded" after a stop, including
+        # failed swap recovery.
+        active_alias = None
 
 
 async def start_engine(entry: dict) -> None:
@@ -360,6 +443,7 @@ async def acquire_engine(alias: str, entry: dict) -> None:
         err_msg = f"Invalid arguments for engine {entry['engine']!r}"
         if unsupported:
             err_msg += f": unsupported flag {unsupported[0]!r}"
+        raise HTTPException(503, err_msg)
     if WRAPPER_MODE == "persistent" and DEFAULT_MODEL and alias != DEFAULT_MODEL:
         raise HTTPException(
             400,
@@ -389,14 +473,22 @@ async def acquire_engine(alias: str, entry: dict) -> None:
         try:
             log.info("Swapping engine: %s -> %s", active_alias, alias)
             await start_engine(entry)
+        except PodmanTimeout as exc:
+            await _clear_swapping()
+            log.error("Podman timed out during swap to %r: %s", alias, exc)
+            raise HTTPException(503, f"Engine swap timed out for {alias!r}; retry") from exc
         except BaseException:
             await _clear_swapping()
             raise
-        async with _guard:
-            _swapping = False
-            _inflight += 1
-            active_alias = alias
-            _guard.notify_all()
+        try:
+            async with _guard:
+                _swapping = False
+                _inflight += 1
+                active_alias = alias
+                _guard.notify_all()
+        except BaseException:
+            await _clear_swapping()
+            raise
         return
 
 
@@ -437,13 +529,14 @@ async def lifespan(app: FastAPI):
             "WARNING: MODELS_HOST_DIR is unset or empty — engine containers will mount /models "
             "which may not exist on the host. Set MODELS_HOST_DIR to the absolute host path."
         )
-    # Verify the engine network exists
-    proc = await asyncio.create_subprocess_exec(
-        "podman", "--url", PODMAN_URL, "network", "exists", ENGINE_NETWORK,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    await proc.communicate()
-    if proc.returncode != 0:
-        log.warning(f"Podman network {ENGINE_NETWORK!r} does not exist - continuing anyway")
+    # Verify the engine network exists. Bounded: a wedged podman socket at
+    # startup must warn and continue, not hang application boot.
+    try:
+        rc = await podman_rc("network", "exists", ENGINE_NETWORK)
+        if rc != 0:
+            log.warning(f"Podman network {ENGINE_NETWORK!r} does not exist - continuing anyway")
+    except PodmanTimeout as exc:
+        log.warning("Podman network exists check timed out: %s - continuing anyway", exc)
 
     # Refuse to start if API key is empty and anonymous is not explicitly allowed
     if not API_KEY and not ALLOW_ANONYMOUS:
@@ -504,6 +597,56 @@ async def health():
 async def status(request: Request):
     check_auth(request)
     return {"status": "ok", "active_model": active_alias}
+
+
+@app.post("/v1/unload")
+async def unload_engine(request: Request):
+    """Stop the active engine and free VRAM.
+
+    Drains in-flight requests first (same guard as a model swap), then
+    stops the engine container and waits out the VRAM cooldown so the
+    driver releases the memory map.  Use this before launching other
+    GPU-heavy workloads (e.g. ComfyUI).
+    """
+    check_auth(request)
+    global _swapping, active_alias
+    while True:
+        async with _guard:
+            if _swapping:
+                await _guard.wait_for(lambda: not _swapping)
+                continue
+            if active_alias is None:
+                return {"status": "already_unloaded", "previous_model": None}
+            _swapping = True
+            try:
+                while _inflight > 0:
+                    await _guard.wait()
+            except BaseException:
+                _swapping = False
+                _guard.notify_all()
+                raise
+        try:
+            log.info("Unload requested (was: %s)", active_alias)
+            prev = active_alias
+            await stop_engine()
+            await asyncio.sleep(VRAM_COOLDOWN_S)
+        except PodmanTimeout as exc:
+            await _clear_swapping()
+            log.error("Podman timed out during unload (was: %r): %s", active_alias, exc)
+            raise HTTPException(503, "Engine unload timed out; retry") from exc
+        except BaseException:
+            await _clear_swapping()
+            raise
+        try:
+            async with _guard:
+                _swapping = False
+                active_alias = None
+                _guard.notify_all()
+        except BaseException:
+            await _clear_swapping()
+            raise
+        log.info("Engine unloaded (was: %s), VRAM freed", prev)
+        return {"status": "unloaded", "previous_model": prev}
 
 
 @app.get("/v1/models")
