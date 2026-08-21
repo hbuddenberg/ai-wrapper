@@ -68,20 +68,20 @@ All tasks are in `ai-wrapper/main.py` unless noted. New test file per unit.
 
 ## Phase 4: Generation-Limits Allowlist & CLI-Leak Guard (PR 2)
 
-- [ ] 4.1 RED `test_max_tokens.py::test_default_max_tokens_admitted_by_registry_validation` — `[args].default_max_tokens = 2048` passes `_validate_args()`.
-- [ ] 4.2 GREEN: add `"default_max_tokens"` to `_ARGS_ALLOWLIST` (73-74); extend `_validate_args()` — must be `int`, not `bool`, `>= 0`.
-- [ ] 4.3 RED `test_default_max_tokens_never_emitted_to_cli` — `build_engine_command()` output contains no `default_max_tokens`-derived flag/value (Threat: subprocess argument composition).
-- [ ] 4.4 GREEN: add `_WRAPPER_ONLY_ARGS = {"load_timeout", "default_max_tokens"}` filter as the first line of `build_engine_command()` (234); every branch reads the filtered dict.
+- [x] 4.1 RED `test_max_tokens.py::test_default_max_tokens_admitted_by_registry_validation` — `[args].default_max_tokens = 2048` passes `_validate_args()`.
+- [x] 4.2 GREEN: add `"default_max_tokens"` to `_ARGS_ALLOWLIST` (73-74); extend `_validate_args()` — must be `int`, not `bool`, `>= 0`.
+- [x] 4.3 RED `test_default_max_tokens_never_emitted_to_cli` — `build_engine_command()` output contains no `default_max_tokens`-derived flag/value (Threat: subprocess argument composition).
+- [x] 4.4 GREEN: add `_WRAPPER_ONLY_ARGS = {"load_timeout", "default_max_tokens"}` filter as the first line of `build_engine_command()` (234); every branch reads the filtered dict.
 
 ## Phase 5: Generation-Limits Injection Logic + PR 2 Verification (PR 2)
 
-- [ ] 5.1 RED `test_injection_precedence_table` (parametrized) — per-model `default_max_tokens` > `DEFAULT_MAX_TOKENS` env(4096) > disabled when resolved value is `0`.
-- [ ] 5.2 GREEN: implement `_inject_default_max_tokens(body, alias, entry)` — omission check (`body.get(k) is not None` for `max_tokens`/`max_completion_tokens`/`n_predict`), precedence resolution, mutate `body["max_tokens"]`, INFO log.
-- [ ] 5.3 RED `test_explicit_value_preserved_including_null_and_zero` — `max_tokens: 256` untouched; `max_tokens: null` treated as omitted; `max_tokens: 0` treated as explicit (not injected over).
-- [ ] 5.4 GREEN: confirm/adjust omission predicate for the null/zero edge cases from 5.3.
-- [ ] 5.5 RED `test_streaming_request_receives_same_injection` — `TestClient` with `stream: true`; body forwarded to `stream_upstream()` carries the injected value.
-- [ ] 5.6 GREEN: call `_inject_default_max_tokens()` once in `chat_completions()` (675-686), before the stream/non-stream branch.
-- [ ] 5.7 RED `test_injection_logs_info_line_with_alias_and_value` — caplog contains alias + resolved value.
-- [ ] 5.8 GREEN: confirm `log.info("Default max_tokens injected: model=%s value=%d source=%s", ...)` format matches; adjust if 5.7 fails.
-- [ ] 5.9 Update `nuc-infra/env.example` with `DEFAULT_MAX_TOKENS` (default 4096) + comment.
-- [ ] 5.10 Run `python3 -m pytest ai-wrapper/tests/ -v` and `python -m py_compile ai-wrapper/main.py`; verify all four `proposal.md` Success Criteria against behavior.
+- [x] 5.1 RED `test_injection_precedence_table` (parametrized) — per-model `default_max_tokens` > `DEFAULT_MAX_TOKENS` env(4096) > disabled when resolved value is `0`.
+- [x] 5.2 GREEN: implement `_inject_default_max_tokens(body, alias, entry)` — omission check (`body.get(k) is not None` for `max_tokens`/`max_completion_tokens`/`n_predict`), precedence resolution, mutate `body["max_tokens"]`, INFO log.
+- [x] 5.3 RED `test_explicit_value_preserved_including_null_and_zero` — `max_tokens: 256` untouched; `max_tokens: null` treated as omitted; `max_tokens: 0` treated as explicit (not injected over).
+- [x] 5.4 GREEN: confirm/adjust omission predicate for the null/zero edge cases from 5.3.
+- [x] 5.5 RED `test_streaming_request_receives_same_injection` — `TestClient` with `stream: true`; body forwarded to `stream_upstream()` carries the injected value.
+- [x] 5.6 GREEN: call `_inject_default_max_tokens()` once in `chat_completions()` (675-686), before the stream/non-stream branch.
+- [x] 5.7 RED `test_injection_logs_info_line_with_alias_and_value` — caplog contains alias + resolved value.
+- [x] 5.8 GREEN: confirm `log.info("Default max_tokens injected: model=%s value=%d source=%s", ...)` format matches; adjust if 5.7 fails.
+- [x] 5.9 Update `nuc-infra/env.example` with `DEFAULT_MAX_TOKENS` (default 4096) + comment.
+- [x] 5.10 Run `python3 -m pytest ai-wrapper/tests/ -v` and `python -m py_compile ai-wrapper/main.py`; verify all four `proposal.md` Success Criteria against behavior.

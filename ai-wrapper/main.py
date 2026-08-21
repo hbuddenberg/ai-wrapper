@@ -94,9 +94,31 @@ DEFAULT_LOAD_TIMEOUT_S = 30
 WRAPPER_MODE = os.getenv("WRAPPER_MODE", "dynamic").lower()
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "")
 
+
+def _parse_default_max_tokens(name: str, default: int) -> int:
+    """Parse a non-negative-int env var; fall back to `default` (with a
+    warning) on missing/invalid/negative input. 0 is a valid value (disables
+    injection) and is NOT treated as invalid."""
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        val = int(raw)
+    except ValueError:
+        log.warning("%s=%r is not a valid integer; using default %s", name, raw, default)
+        return default
+    if val < 0:
+        log.warning("%s=%r must be non-negative; using default %s", name, raw, default)
+        return default
+    return val
+
+
+DEFAULT_MAX_TOKENS = _parse_default_max_tokens("DEFAULT_MAX_TOKENS", 4096)
+
 # Fix 2: allowlist for [args] keys
 _ARGS_ALLOWLIST = {"ctx_size", "n_gpu_layers", "flash_attn", "draft_model",
-                   "draft_max", "draft_min", "load_timeout", "mmproj", "extra"}
+                   "draft_max", "draft_min", "load_timeout", "mmproj", "extra",
+                   "default_max_tokens"}
 # Regex for extra items: --flag[=value] or bare value
 _EXTRA_FLAG_RE = re.compile(r'^--[A-Za-z0-9][A-Za-z0-9_.:=-]*$')
 _EXTRA_BARE_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.:=-]*$')
@@ -147,6 +169,16 @@ def _validate_args(args: dict, cfg_path: Path | str, schema_flags: set[str] | No
         log.error("Config %s: [args].draft_model %r must be a filename, not a path — excluded",
                   cfg_path, draft)
         return False
+    default_max_tokens = args.get("default_max_tokens")
+    if default_max_tokens is not None:
+        # isinstance(True, int) is True in Python, so bool must be excluded
+        # explicitly or `default_max_tokens = true` would silently pass as 1.
+        if isinstance(default_max_tokens, bool) or not isinstance(default_max_tokens, int) \
+                or default_max_tokens < 0:
+            log.error(
+                "Config %s: [args].default_max_tokens %r must be a non-negative integer — excluded",
+                cfg_path, default_max_tokens)
+            return False
     return True
 
 
@@ -261,10 +293,15 @@ def scan_registry() -> dict[str, dict]:
     return registry
 
 
+_WRAPPER_ONLY_ARGS = {"load_timeout", "default_max_tokens"}  # accepted in config.toml, never a llama-server flag
+
+
 def build_engine_command(entry: dict) -> list[str]:
     """Translate a config.toml [args] table into llama-server flags."""
     folder = f"/models/{entry['folder']}"
-    args = entry["args"]
+    # Guard by construction: every branch below reads the filtered dict, so a
+    # future `if "default_max_tokens" in args:` branch is dead by construction.
+    args = {k: v for k, v in entry["args"].items() if k not in _WRAPPER_ONLY_ARGS}
     cmd = ["llama-server", "-m", f"{folder}/{entry['file']}",
            "--host", "0.0.0.0", "--port", str(ENGINE_PORT)]
     if "ctx_size" in args:
@@ -763,6 +800,31 @@ async def revoke_key(key: str, request: Request):
     return {"revoked": removed, "remaining_file_keys": len(remaining)}
 
 
+_GENERATION_LIMIT_KEYS = ("max_tokens", "max_completion_tokens", "n_predict")
+
+
+def _inject_default_max_tokens(body: dict, alias: str, entry: dict) -> None:
+    """Inject a server-side default max_tokens into `body` when the client
+    omitted every generation-length key (absent or explicit null). Never
+    overwrites an explicit non-null value, including 0. Precedence:
+    per-model [args].default_max_tokens > DEFAULT_MAX_TOKENS env (4096) >
+    no injection when the resolved value is 0."""
+    if any(body.get(k) is not None for k in _GENERATION_LIMIT_KEYS):
+        return
+
+    per_model = entry.get("args", {}).get("default_max_tokens")
+    if per_model is not None:
+        limit, source = per_model, "config"
+    else:
+        limit, source = DEFAULT_MAX_TOKENS, "env"
+
+    if limit <= 0:
+        return
+
+    body["max_tokens"] = limit
+    log.info("Default max_tokens injected: model=%s value=%d source=%s", alias, limit, source)
+
+
 @app.post("/v1/chat/completions")
 @app.post("/chat/completions")
 async def chat_completions(request: Request):
@@ -772,6 +834,8 @@ async def chat_completions(request: Request):
     registry = scan_registry()
     if alias not in registry:
         raise HTTPException(404, f"Unknown model {alias!r}. Available: {list(registry)}")
+
+    _inject_default_max_tokens(body, alias, registry[alias])
 
     # Swap (if needed) and register this request as in-flight, atomically
     await acquire_engine(alias, registry[alias])
