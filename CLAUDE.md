@@ -19,6 +19,7 @@ Action (no nested `.git`, no per-subdir remote):
 - `llama-atomic/` — CUDA build pipeline for the speculative-decoding llama.cpp fork.
 - `llama-tom/` — CUDA build pipeline for the TurboQuant 3-bit KV-cache llama.cpp fork.
 - `llama-cuda/` — CUDA build pipeline for upstream `ggerganov/llama.cpp` (general-purpose engine).
+- `llama-bonsai/` — CUDA build pipeline for the PrismML llama.cpp fork (ternary g128 / Bonsai GGUF packings; builds branch `prism`).
 
 Everything lives in this single repo — no nested `.git`, no per-subdir
 remote. The `*/.github/workflows/deploy.yml` files inside each subdir are
@@ -60,7 +61,7 @@ cp env.example .env && podman-compose up -d
 ./scripts/fetch-models.sh && ./scripts/tailscale-expose.sh
 ```
 
-CI: four path-filtered workflows in `.github/workflows/` (one per buildable
+CI: five path-filtered workflows in `.github/workflows/` (one per buildable
 component — `deploy-ai-wrapper.yml`, `deploy-llama-atomic.yml`,
 `deploy-llama-tom.yml`, `deploy-llama-cuda.yml`) each push
 `ghcr.io/<owner>/<component>:latest` on push to main when the matching path
