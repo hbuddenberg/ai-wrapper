@@ -25,7 +25,8 @@ cp env.example .env            # then fill in the secrets
 podman pull ghcr.io/$GH_USER/llama-atomic:latest
 podman pull ghcr.io/$GH_USER/llama-tom:latest
 podman-compose up -d
-./scripts/tailscale-expose.sh  # publish port 5120 on the tailnet
+./scripts/tailscale-expose.sh  # publish port 5128 on the tailnet
+tailscale funnel --bg 5128    # (optional) publish publicly at https://<hostname>.<tailnet>.ts.net
 ```
 
 The rootless Podman socket must be enabled on the host:
@@ -43,8 +44,9 @@ create a systemd unit that runs `scripts/tailscale-expose.sh` after
 | Service    | URL                                     |
 | ---------- | --------------------------------------- |
 | LibreChat  | `http://<host>:3000`                    |
-| AI API     | `http://<host>:5120/v1` (Bearer auth)   |
-| AI API (tailnet) | `http://<tailnet-hostname>:5120/v1` |
+| AI API     | `http://<host>:5128/v1` (Bearer auth)   |
+| AI API (tailnet) | `http://<tailnet-hostname>:5128/v1` |
+| AI API (public, Funnel) | `https://<tailnet-hostname>.<tailnet>.ts.net/v1` (Bearer auth) |
 
 ## Memory budget (idle)
 

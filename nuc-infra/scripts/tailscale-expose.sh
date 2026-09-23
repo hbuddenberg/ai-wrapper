@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Publish the ai-wrapper endpoint (host port 5120) on the tailnet.
-# Clients then reach it at http://<tailnet-hostname>:5120/v1
+# Publish the ai-wrapper endpoint (host port 5128) on the tailnet.
+# Clients then reach it at http://<tailnet-hostname>:5128/v1
+#
+# Public internet access (Tailscale Funnel) is separate and persisted in
+# tailscaled state; enable it once with: tailscale funnel --bg 5128
 #
 # Fix 14: SECURITY WARNING
 # -------------------------
@@ -12,7 +15,7 @@
 # -------------------------
 set -euo pipefail
 
-PORT="${1:-5120}"
+PORT="${1:-5128}"
 
 command -v tailscale >/dev/null || {
   echo "tailscale CLI not found on this host."

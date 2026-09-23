@@ -12,7 +12,7 @@ components, each built and published by its own path-filtered GitHub
 Action (no nested `.git`, no per-subdir remote):
 
 - `nuc-infra/` — orchestration only (podman-compose, configs, scripts). Cloned onto the host.
-- `ai-wrapper/` — FastAPI "VRAM Director": the single OpenAI-compatible endpoint (port 5120 on the host, published on the tailnet via `tailscale serve`).
+- `ai-wrapper/` — FastAPI "VRAM Director": the single OpenAI-compatible endpoint (host port 5128, published on the tailnet via `tailscale serve` and to the public internet via Tailscale Funnel at `https://nuc-ai.emperor-betta.ts.net`).
 - `llama-atomic/` — CUDA build pipeline for the speculative-decoding llama.cpp fork.
 - `llama-tom/` — CUDA build pipeline for the TurboQuant 3-bit KV-cache llama.cpp fork.
 - `llama-cuda/` — CUDA build pipeline for upstream `ggerganov/llama.cpp` (general-purpose engine).
@@ -24,7 +24,8 @@ vestigial; the active CI is the path-filtered set at `.github/workflows/`.
 ## Architecture
 
 Request flow: client (LibreChat / Hermes on nuc-ai / any OpenAI client) →
-`ai-wrapper:5120/v1` → active engine container (`llama-engine`, port 8080).
+`ai-wrapper:5128/v1` (or `https://nuc-ai.emperor-betta.ts.net/v1` via Funnel) →
+active engine container (`llama-engine`, port 8080).
 
 Hard rules:
 - **VRAM isolation**: the engine containers must NEVER run concurrently. ai-wrapper
