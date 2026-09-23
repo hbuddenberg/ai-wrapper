@@ -29,6 +29,9 @@ jobs:
         with:
           context: ai-wrapper
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          # Legacy package path (pre-rename repo name). The container package
+          # "ai-wrapper" is owned by ai-wrapper-archived, so this repo cannot
+          # push to ghcr.io/<owner>/ai-wrapper; the linked package keeps working.
+          tags: ghcr.io/${{ github.repository_owner }}/llama-cpp/ai-wrapper:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
