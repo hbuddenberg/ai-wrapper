@@ -54,7 +54,7 @@ engine holds the GPU at any time.
 ### Install
 
 ```bash
-git clone https://github.com/hbuddenberg/llama-cpp.git
+git clone https://github.com/hbuddenberg/ai-wrapper.git
 cd llama-cpp
 ./nuc-infra/scripts/release.sh
 ```

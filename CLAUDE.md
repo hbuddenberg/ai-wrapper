@@ -7,7 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Workspace for a distributed AI appliance targeting a headless uCore host
 (Fedora CoreOS + Podman CDI) with an i3 8th Gen, 16GB RAM and an RTX 3060
  12GB eGPU (Compute Capability 8.6, Thunderbolt 3). It is **one git
-repository** (`github.com/hbuddenberg/llama-cpp`) with five top-level
+repository** (`github.com/hbuddenberg/ai-wrapper`, renamed from
+`llama-cpp`; the ghcr image package keeps the legacy
+`llama-cpp/ai-wrapper` path because the `ai-wrapper` package name is
+taken by the archived standalone repo) with five top-level
 components, each built and published by its own path-filtered GitHub
 Action (no nested `.git`, no per-subdir remote):
 
